@@ -1,1 +1,1 @@
-"# Car-Scrapping" 
+This project aims to scrape data from the website https://www.auto-data.net/en/ using Selenium. By leveraging Selenium's web automation capabilities, we can programmatically navigate through the website and extract the desired data. The data were write into json file in resources folder.
