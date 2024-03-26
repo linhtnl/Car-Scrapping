@@ -1,109 +1,88 @@
 package linh.to;
 
 import com.google.gson.Gson;
-import linh.to.handler.CrawlHandler;
-import linh.to.models.BrandModel;
-import linh.to.models.CarModel;
-import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang3.time.DurationFormatUtils;
-import org.openqa.selenium.By;
+import linh.to.constants.FileNameConstants;
+import linh.to.entities.ModelGenerationEntity;
+import linh.to.handlers.CrawlCarBrandHandler;
+import linh.to.handlers.CrawlCarModelGenerationHandler;
+import linh.to.handlers.CrawlCarModelHandler;
+import linh.to.handlers.WebDriverHandler;
+import linh.to.entities.BrandEntity;
+import linh.to.entities.ModelEntity;
+import linh.to.utils.FileUtils;
+import linh.to.utils.LoggerUtil;
 import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
-import org.openqa.selenium.chrome.ChromeDriver;
-import org.openqa.selenium.firefox.FirefoxDriver;
 
-import java.io.File;
-import java.util.ArrayList;
+import java.text.MessageFormat;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
-// Press Shift twice to open the Search Everywhere dialog and type `show whitespaces`,
-// then press Enter. You can now see whitespace characters in your code.
 public class Main {
+    private static WebDriver driver;
+
+    private static final int LOG_LEVEL = 1;
     public static void main(String[] args) {
-        katalonTest();
-//        Long timeStart = System.currentTimeMillis();
-//        List<String> writtenBrands = getWrittenBrands();
-//        try {
-//            CrawlHandler.getInstance().initWebDriver();
-//            List<BrandModel> brands = CrawlHandler.getInstance().crawlBrandModels();
-////            writeBrands(brands);
-//            for (BrandModel brand : brands) {
-//                if (!writtenBrands.contains(brand.getName())) {
-//                    // Refesh for long session
-//                    CrawlHandler.getInstance().openWebDriver();
-//                    Long start = System.currentTimeMillis();
-//                    List<CarModel> cars = CrawlHandler.getInstance().crawlCarModels(brand);
-//                    for (CarModel car : cars) {
-//                        car.setCarGeneration(CrawlHandler.getInstance().crawlCarGenerationModel(car));
-//                    }
-//                    brand.setCars(cars);
-//                    writeBrandModel(brand);
-//                    CrawlHandler.getInstance().closeWebDriver();
-//                    Long end = System.currentTimeMillis();
-//                    System.out.println("Time consumed: " + DurationFormatUtils.formatDuration(end - start, "mm:ss,SSS"));
-//                }
-//            } //https://www.auto-data.net/en/lada-brand-140 eror
-//            writeCarTypes();
-//        } finally {
-//            CrawlHandler.getInstance().destroy();
-//            Long timeEnd = System.currentTimeMillis();
-//            System.out.println("Total time: " + DurationFormatUtils.formatDuration(timeEnd - timeStart, "mm:ss,SSS"));
-//        }
+        // Clear files
+        FileUtils.emptyResourceFolder();
 
-    }
+        Long timeStart = System.currentTimeMillis();
 
-    private static void katalonTest() {
-        int number = 60;
-        for (int i = 0; i < number; i++) {
-            WebDriver driver = new FirefoxDriver();
-            driver.get("https://www.google.com/");
-            driver.quit();
-        }
-    }
+        driver = WebDriverHandler.getInstance().openHomePage();
+        Set<String> carTypes = new HashSet<>();
 
-    private static List<String> getWrittenBrands() {
-        List<String> writtenBrands = new ArrayList<>();
-        File folder = new File("src\\main\\resources");
-        for (File f : folder.listFiles()) {
-            if (!f.getName().equals("brands.json") && !f.getName().equals("car_types.json")) {
-                writtenBrands.add(f.getName().replace(".json", ""));
-            }
-        }
-        return writtenBrands;
-    }
-
-    private static void writeBrands(List<BrandModel> brands) {
-        Gson gson = new Gson();
-        String json = gson.toJson(brands);
-        File f = new File("src\\main\\resources\\brands.json");
-        writeFile(json, f);
-    }
-
-    private static void writeCarTypes() {
-        Gson gson = new Gson();
-        String json = gson.toJson(CrawlHandler.getInstance().getCarTypes());
-        File f = new File("src\\main\\resources\\car_types.json");
-        writeFile(json, f);
-    }
-
-    private static void writeFile(String json, File f) {
         try {
-            if (f.exists()) {
-                f.deleteOnExit();
+            List<BrandEntity> brands = crawlBrandsAndStoreFile();
+            for (BrandEntity brand : brands) {
+                List<ModelEntity> models = crawlModelAndStoreFile(brand);
+                for (ModelEntity model : models) {
+                    List<ModelGenerationEntity> generationModels = crawlModelGenerationsAndStoreFile(model, brand.getName());
+                    model.setCarGeneration(generationModels);
+                    extractCarType(generationModels, carTypes);
+                }
+                brand.setCars(models);
+                writeFile(brand, FileNameConstants.BRANDS_FILE_NAME);
+                writeFile(carTypes, FileNameConstants.CAR_TYPES_FILE_NAME);
+
             }
-            f.createNewFile();
-            FileUtils.writeStringToFile(f, json);
-        } catch (Exception e) {
-            e.printStackTrace();
+        } finally {
+            WebDriverHandler.getInstance().destroy();
+            LoggerUtil.printTimeComsuming("Total time", timeStart, LOG_LEVEL);
         }
     }
 
-    private static void writeBrandModel(BrandModel brand) {
+    private static void extractCarType(List<ModelGenerationEntity> generationModels, Set<String> carTypes) {
+        for (ModelGenerationEntity modelGeneration : generationModels) {
+            carTypes.add(modelGeneration.getCarType());
+        }
+    }
+
+    private static List<ModelGenerationEntity> crawlModelGenerationsAndStoreFile(ModelEntity model, String brandName) {
+        List<ModelGenerationEntity> generationModels = CrawlCarModelGenerationHandler.crawl(driver, model);
+        String fileName = MessageFormat.format(FileNameConstants.CAR_MODEL_GENERATION_FILE_NAME, brandName, model.getCarGeneration());
+        writeFile(generationModels, fileName);
+
+        return generationModels;
+    }
+
+    private static List<BrandEntity> crawlBrandsAndStoreFile() {
+        List<BrandEntity> brands = CrawlCarBrandHandler.crawl(driver);
+        writeFile(brands, FileNameConstants.BRAND_GENERAL_FILE_NAME);
+        return brands;
+    }
+
+    private static List<ModelEntity> crawlModelAndStoreFile(BrandEntity brand) {
+        List<ModelEntity> models = CrawlCarModelHandler.crawl(driver, brand);
+        String fileName = MessageFormat.format(FileNameConstants.CAR_MODELS_FILE_NAME, brand);
+        writeFile(models, fileName);
+        return models;
+    }
+
+
+    private static void writeFile(Object obj, String fileName) {
         Gson gson = new Gson();
-        String json = gson.toJson(brand);
-        File f = new File("src\\main\\resources", brand.getName() + ".json");
-        System.out.println("Write into file - " + f.getAbsolutePath());
-        writeFile(json, f);
+        String json = gson.toJson(obj);
+        FileUtils.writeFile(json, fileName);
     }
 
 }
